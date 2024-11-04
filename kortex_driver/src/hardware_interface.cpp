@@ -788,9 +788,6 @@ return_type KortexMultiInterfaceHardware::read(
   // TODO(livanov93): separate warnings into another variable to expose it via fault controller
   //     + feedback_.base().warning_bank_a() + feedback_.base().warning_bank_b());
 
-  // add mode that can't be easily reached
-  in_fault_ += (feedback_.base().active_state() == k_api::Common::ARMSTATE_SERVOING_READY);
-
   return return_type::OK;
 }
 
@@ -866,7 +863,7 @@ return_type KortexMultiInterfaceHardware::write(
       else
       {
         // Keep alive mode - no controller active
-        RCLCPP_DEBUG(LOGGER, "No controller active in SINGLE_LEVEL_SERVOING mode!");
+        RCLCPP_DEBUG_ONCE(LOGGER, "No controller active in SINGLE_LEVEL_SERVOING mode!");
       }
 
       // gripper control
@@ -894,14 +891,14 @@ return_type KortexMultiInterfaceHardware::write(
       {
         // Keep alive mode - no controller active
         feedback_ = base_cyclic_.RefreshFeedback();
-        RCLCPP_DEBUG(LOGGER, "No controller active in LOW_LEVEL_SERVOING mode !");
+        RCLCPP_DEBUG_ONCE(LOGGER, "No controller active in LOW_LEVEL_SERVOING mode !");
       }
     }
     else
     {
       // Keep alive mode - no controller active
       feedback_ = base_cyclic_.RefreshFeedback();
-      RCLCPP_DEBUG(
+      RCLCPP_DEBUG_ONCE(
         LOGGER,
         "Fault was not recognized on the robot but combination of Control Mode and Active State "
         "are not supported!");
