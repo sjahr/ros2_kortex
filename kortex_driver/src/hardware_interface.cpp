@@ -788,6 +788,9 @@ return_type KortexMultiInterfaceHardware::read(
   // TODO(livanov93): separate warnings into another variable to expose it via fault controller
   //     + feedback_.base().warning_bank_a() + feedback_.base().warning_bank_b());
 
+  // add mode that can't be easily reached
+  in_fault_ += (feedback_.base().active_state() == k_api::Common::ARMSTATE_SERVOING_READY);
+
   return return_type::OK;
 }
 
