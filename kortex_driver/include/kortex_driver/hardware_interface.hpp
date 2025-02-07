@@ -207,7 +207,11 @@ private:
   // fault control
   double reset_fault_cmd_;
   double reset_fault_async_success_;
-  double in_fault_;
+  double in_fault_ = false;
+  double actuator_fault_bank_a_ = 0;
+  double actuator_fault_bank_b_ = 0;
+  double base_fault_bank_a_ = 0;
+  double base_fault_bank_b_ = 0;
   static constexpr double NO_CMD = std::numeric_limits<double>::quiet_NaN();
 
   void sendTwistCommand();

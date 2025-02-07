@@ -93,6 +93,17 @@ CallbackReturn KortexMultiInterfaceHardware::on_init(const hardware_interface::H
   }
 
   info_ = info;
+  // The robot name.
+  std::string robot_name = info_.hardware_parameters["robot_name"];
+  if (robot_name.empty())
+  {
+    RCLCPP_ERROR(LOGGER, "Robot name is empty!");
+    return CallbackReturn::ERROR;
+  }
+  else
+  {
+    RCLCPP_INFO(LOGGER, "Robot name is '%s'", robot_name.c_str());
+  }
   // The robot's IP address.
   std::string robot_ip = info_.hardware_parameters["robot_ip"];
   if (robot_ip.empty())
@@ -322,9 +333,17 @@ KortexMultiInterfaceHardware::export_state_interfaces()
       arm_joint_names[i], hardware_interface::HW_IF_EFFORT, &arm_efforts_[i]));
   }
 
-  // state interface which reports if robot is faulted
-  state_interfaces.emplace_back(
-    hardware_interface::StateInterface("reset_fault", "internal_fault", &in_fault_));
+  // State interfaces to report if the arm is in fault, and associated fault codes.
+  state_interfaces.emplace_back(hardware_interface::StateInterface(
+    info_.hardware_parameters["robot_name"], "in_fault", &in_fault_));
+  state_interfaces.emplace_back(hardware_interface::StateInterface(
+    info_.hardware_parameters["robot_name"], "actuator_fault_bank_a", &actuator_fault_bank_a_));
+  state_interfaces.emplace_back(hardware_interface::StateInterface(
+    info_.hardware_parameters["robot_name"], "actuator_fault_bank_b", &actuator_fault_bank_b_));
+  state_interfaces.emplace_back(hardware_interface::StateInterface(
+    info_.hardware_parameters["robot_name"], "base_fault_bank_a", &base_fault_bank_a_));
+  state_interfaces.emplace_back(hardware_interface::StateInterface(
+    info_.hardware_parameters["robot_name"], "base_fault_bank_b", &base_fault_bank_b_));
 
   return state_interfaces;
 }
@@ -758,8 +777,18 @@ return_type KortexMultiInterfaceHardware::read(
     feedback_ = base_cyclic_.RefreshFeedback();
   }
 
-  // read if robot is faulted
-  in_fault_ = (feedback_.base().active_state() == Kinova::Api::Common::ArmState::ARMSTATE_IN_FAULT);
+  // Read if robot is faulted, or in a control mode that should be considered a fault.
+  in_fault_ =
+    (feedback_.base().active_state() != Kinova::Api::Common::ArmState::ARMSTATE_SERVOING_LOW_LEVEL);
+  if (in_fault_ != 0)
+  {
+    RCLCPP_ERROR_ONCE(LOGGER, "Detected fault or control mode change. Triggering an artificial fault.");
+  }
+
+  actuator_fault_bank_a_ = 0.0;
+  actuator_fault_bank_b_ = 0.0;
+  base_fault_bank_a_ = 0.0;
+  base_fault_bank_b_ = 0.0;
 
   // read gripper state
   readGripperPosition();
@@ -776,20 +805,40 @@ return_type KortexMultiInterfaceHardware::read(
       KortexMathUtil::toRad(feedback_.actuators(i).position()),
       num_turns_tmp_);  // rad
 
-    in_fault_ += (feedback_.actuators(i).fault_bank_a() + feedback_.actuators(i).fault_bank_b());
+    actuator_fault_bank_a_ += feedback_.actuators(i).fault_bank_a();
+    actuator_fault_bank_b_ += feedback_.actuators(i).fault_bank_b();
 
     // TODO(livanov93): separate warnings into another variable to expose it via fault controller
     //       feedback_.actuators(i).warning_bank_a() + feedback_.actuators(i).warning_bank_b());
   }
 
-  // add all base's faults and warnings into series
-  in_fault_ += (feedback_.base().fault_bank_a() + feedback_.base().fault_bank_b());
+  base_fault_bank_a_ = feedback_.base().fault_bank_a();
+  base_fault_bank_b_ = feedback_.base().fault_bank_b();
+
+  in_fault_ = in_fault_ || (actuator_fault_bank_a_ != 0) || (actuator_fault_bank_b_ != 0) ||
+              (base_fault_bank_a_ != 0) || (base_fault_bank_b_ != 0);
+  if (actuator_fault_bank_a_ != 0 || actuator_fault_bank_b_ != 0)
+  {
+    RCLCPP_ERROR_ONCE(
+      LOGGER,
+      "Detected Kinova actuator fault in %s. bank_a code: %d, bank_b_code: %d. Reset faults to "
+      "continue control.",
+      info_.hardware_parameters["robot_name"].c_str(), static_cast<int>(actuator_fault_bank_a_),
+      static_cast<int>(actuator_fault_bank_b_));
+  }
+  if (base_fault_bank_a_ != 0 || base_fault_bank_b_ != 0)
+  {
+    RCLCPP_ERROR_ONCE(
+      LOGGER,
+      "Detected Kinova base fault in %s, bank_a code: %d, bank_b code: %d. Reset faults to "
+      "continue "
+      "control.",
+      info_.hardware_parameters["robot_name"].c_str(), static_cast<int>(base_fault_bank_a_),
+      static_cast<int>(base_fault_bank_b_));
+  }
 
   // TODO(livanov93): separate warnings into another variable to expose it via fault controller
   //     + feedback_.base().warning_bank_a() + feedback_.base().warning_bank_b());
-
-  // add mode that can't be easily reached
-  in_fault_ += (feedback_.base().active_state() == k_api::Common::ARMSTATE_SERVOING_READY);
 
   return return_type::OK;
 }
